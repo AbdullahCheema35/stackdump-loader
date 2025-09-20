@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,41 @@ import (
 // ---- Generic Interface ----
 type CSVConvertible interface {
 	ToCSV() []string
+}
+
+// ---- Job Queue ----
+type Job struct {
+	FileName string
+}
+
+var jobs = make(chan Job, 100) // buffered channel
+var done = make(chan struct{})
+
+func worker(jobs <-chan Job, done chan<- struct{}, base string) {
+	base = strings.ToLower(base) // e.g., tags, users, badges, votes, comments
+
+	// process jobs
+	for job := range jobs {
+		fmt.Println("⚙️ Processing:", job.FileName)
+
+		cmd := exec.Command("make", base, fmt.Sprintf("filename=%s", job.FileName))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("❌ command failed for %s: %v\n", job.FileName, err)
+			continue
+		}
+
+		// success → delete file
+		if err := os.Remove(job.FileName); err != nil {
+			fmt.Printf("⚠️ failed to delete %s: %v\n", job.FileName, err)
+		} else {
+			fmt.Printf("✅ success, deleted %s\n", job.FileName)
+		}
+	}
+
+	close(done)
 }
 
 // ---- Structs ----
@@ -168,8 +204,8 @@ func (c *Comment) ToCSV() []string {
 	}
 }
 
-// ---- Generic Converter ----
-func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string, newItem func() T) error {
+// ---- Generic Converter with chunking ----
+func convertXMLToCSV[T CSVConvertible](xmlPath, baseName string, headers []string, newItem func() T) error {
 	// input
 	inFile, err := os.Open(xmlPath)
 	if err != nil {
@@ -179,23 +215,54 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 
 	decoder := xml.NewDecoder(bufio.NewReaderSize(inFile, 4<<20)) // 4 MB buffer
 
-	// output
-	outFile, err := os.Create(csvPath)
-	if err != nil {
-		return err
+	// chunking settings
+	const chunkSize = 10_000_000 // 1 crore rows per chunk
+	const batchSize = 10000      // write in batches of 10k rows
+	fileIndex := 1
+	recordCount := 0
+
+	var outFile *os.File
+	var writer *csv.Writer
+	var bufferedWriter *bufio.Writer
+
+	openNewFile := func() error {
+		if outFile != nil {
+			// finalize previous file
+			writer.Flush()
+			bufferedWriter.Flush()
+			outFile.Close()
+
+			// enqueue job
+			fileName := fmt.Sprintf("%d_%s.csv", fileIndex, baseName)
+			jobs <- Job{FileName: fileName}
+
+			fileIndex++
+		}
+
+		// new file
+		fileName := fmt.Sprintf("%d_%s.csv", fileIndex, baseName)
+		var err error
+		outFile, err = os.Create(fileName)
+		if err != nil {
+			return err
+		}
+		bufferedWriter = bufio.NewWriterSize(outFile, 4<<20)
+		writer = csv.NewWriter(bufferedWriter)
+
+		// write headers
+		if err := writer.Write(headers); err != nil {
+			return err
+		}
+
+		recordCount = 0
+		return nil
 	}
-	defer outFile.Close()
 
-	writer := csv.NewWriter(bufio.NewWriterSize(outFile, 4<<20)) // buffered writer
-	defer writer.Flush()
-
-	// header row
-	if err := writer.Write(headers); err != nil {
+	if err := openNewFile(); err != nil {
 		return err
 	}
 
 	// batching
-	batchSize := 10000
 	batch := make([][]string, 0, batchSize)
 
 	// streaming parse
@@ -213,22 +280,47 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 					continue
 				}
 				batch = append(batch, item.ToCSV())
+				recordCount++
+
 				if len(batch) == cap(batch) {
 					if err := writer.WriteAll(batch); err != nil {
 						return err
 					}
 					batch = batch[:0]
 				}
+
+				if recordCount >= chunkSize {
+					// flush remaining in current batch
+					if len(batch) > 0 {
+						if err := writer.WriteAll(batch); err != nil {
+							return err
+						}
+						batch = batch[:0]
+					}
+					// open next file
+					if err := openNewFile(); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
 
-	// flush remaining
+	// flush last batch
 	if len(batch) > 0 {
 		if err := writer.WriteAll(batch); err != nil {
 			return err
 		}
 	}
+
+	// finalize last file
+	writer.Flush()
+	bufferedWriter.Flush()
+	outFile.Close()
+
+	// enqueue job for last file
+	fileName := fmt.Sprintf("%d_%s.csv", fileIndex, baseName)
+	jobs <- Job{FileName: fileName}
 
 	return nil
 }
@@ -243,14 +335,16 @@ func main() {
 		return
 	}
 
-	base := strings.ToLower(filepath.Base(*inPath))
-	outPath := filepath.Join(filepath.Dir(*inPath), strings.TrimSuffix(filepath.Base(*inPath), filepath.Ext(*inPath))+".csv")
+	base := strings.TrimSuffix(filepath.Base(*inPath), filepath.Ext(*inPath))
 
-	switch base {
+	// start worker
+	go worker(jobs, done, base)
+
+	switch strings.ToLower(filepath.Base(*inPath)) {
 	case "tags.xml":
 		if err := convertXMLToCSV(
 			*inPath,
-			outPath,
+			base,
 			[]string{"id", "tag_name", "count", "excerpt_post_id", "wiki_post_id"},
 			func() *Tag { return &Tag{} },
 		); err != nil {
@@ -259,7 +353,7 @@ func main() {
 	case "users.xml":
 		if err := convertXMLToCSV(
 			*inPath,
-			outPath,
+			base,
 			[]string{"id", "reputation", "creation_date", "display_name", "last_access_date", "website_url", "location", "about_me", "views", "up_votes", "down_votes", "profile_image_url", "account_id"},
 			func() *User { return &User{} },
 		); err != nil {
@@ -268,7 +362,7 @@ func main() {
 	case "badges.xml":
 		if err := convertXMLToCSV(
 			*inPath,
-			outPath,
+			base,
 			[]string{"id", "user_id", "name", "date", "class", "tag_based"},
 			func() *Badge { return &Badge{} },
 		); err != nil {
@@ -277,7 +371,7 @@ func main() {
 	case "votes.xml":
 		if err := convertXMLToCSV(
 			*inPath,
-			outPath,
+			base,
 			[]string{"id", "post_id", "vote_type_id", "user_id", "creation_date", "bounty_amount"},
 			func() *Vote { return &Vote{} },
 		); err != nil {
@@ -286,13 +380,20 @@ func main() {
 	case "comments.xml":
 		if err := convertXMLToCSV(
 			*inPath,
-			outPath,
+			base,
 			[]string{"id", "post_id", "score", "text", "creation_date", "user_display_name", "user_id", "content_license"},
 			func() *Comment { return &Comment{} },
 		); err != nil {
 			panic(err)
 		}
 	default:
-		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml, Votes.xml, Comments.xml supported)\n", base)
+		fmt.Printf("Unsupported file: %s\n", *inPath)
 	}
+
+	// no more jobs → close channel
+	close(jobs)
+
+	// wait for worker
+	<-done
+	fmt.Println("✅ All jobs processed, exiting.")
 }
