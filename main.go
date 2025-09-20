@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"encoding/csv"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // ---- Generic Interface ----
@@ -43,8 +46,44 @@ func (t *Tag) ToCSV() []string {
 	}
 }
 
-// ---- Example Existing Structs (Post/User/Comment/Vote) ----
-// (your previous code here… keeping them as-is)
+// Users.xml
+type User struct {
+	ID              int    `xml:"Id,attr"`
+	Reputation      int    `xml:"Reputation,attr"`
+	CreationDate    string `xml:"CreationDate,attr"`
+	DisplayName     string `xml:"DisplayName,attr"`
+	LastAccessDate  string `xml:"LastAccessDate,attr"`
+	WebsiteURL      string `xml:"WebsiteUrl,attr"`
+	Location        string `xml:"Location,attr"`
+	AboutMe         string `xml:"AboutMe,attr"`
+	Views           int    `xml:"Views,attr"`
+	UpVotes         int    `xml:"UpVotes,attr"`
+	DownVotes       int    `xml:"DownVotes,attr"`
+	ProfileImageURL string `xml:"ProfileImageUrl,attr"`
+	AccountID       *int   `xml:"AccountId,attr"`
+}
+
+func (u *User) ToCSV() []string {
+	account := ""
+	if u.AccountID != nil {
+		account = strconv.Itoa(*u.AccountID)
+	}
+	return []string{
+		strconv.Itoa(u.ID),
+		strconv.Itoa(u.Reputation),
+		u.CreationDate,
+		u.DisplayName,
+		u.LastAccessDate,
+		u.WebsiteURL,
+		u.Location,
+		u.AboutMe,
+		strconv.Itoa(u.Views),
+		strconv.Itoa(u.UpVotes),
+		strconv.Itoa(u.DownVotes),
+		u.ProfileImageURL,
+		account,
+	}
+}
 
 // ---- Generic Converter ----
 func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string, newItem func() T) error {
@@ -85,7 +124,7 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 		switch se := tok.(type) {
 		case xml.StartElement:
 			if se.Name.Local == "row" {
-				item := newItem() // allocate struct
+				item := newItem()
 				if err := decoder.DecodeElement(item, &se); err != nil {
 					fmt.Println("decode error:", err)
 					continue
@@ -111,15 +150,39 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 	return nil
 }
 
-// ---- Example Usage ----
+// ---- Main ----
 func main() {
-	// Tags
-	if err := convertXMLToCSV(
-		"Tags.xml",
-		"tags.csv",
-		[]string{"id", "tag_name", "count", "excerpt_post_id", "wiki_post_id"},
-		func() *Tag { return &Tag{} },
-	); err != nil {
-		panic(err)
+	inPath := flag.String("in", "", "Path to XML file (Tags.xml or Users.xml)")
+	flag.Parse()
+
+	if *inPath == "" {
+		fmt.Println("Please provide -in=/path/to/Tags.xml or Users.xml")
+		return
+	}
+
+	base := strings.ToLower(filepath.Base(*inPath))
+	outPath := filepath.Join(filepath.Dir(*inPath), strings.TrimSuffix(filepath.Base(*inPath), filepath.Ext(*inPath))+".csv")
+
+	switch base {
+	case "tags.xml":
+		if err := convertXMLToCSV(
+			*inPath,
+			outPath,
+			[]string{"id", "tag_name", "count", "excerpt_post_id", "wiki_post_id"},
+			func() *Tag { return &Tag{} },
+		); err != nil {
+			panic(err)
+		}
+	case "users.xml":
+		if err := convertXMLToCSV(
+			*inPath,
+			outPath,
+			[]string{"id", "reputation", "creation_date", "display_name", "last_access_date", "website_url", "location", "about_me", "views", "up_votes", "down_votes", "profile_image_url", "account_id"},
+			func() *User { return &User{} },
+		); err != nil {
+			panic(err)
+		}
+	default:
+		fmt.Printf("Unsupported file: %s (only Tags.xml and Users.xml supported)\n", base)
 	}
 }
