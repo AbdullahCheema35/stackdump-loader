@@ -17,3 +17,7 @@ badges:
 	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -f badge.sql
 	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -c "\copy badge FROM Badges.csv CSV HEADER"
 
+votes:
+	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -f vote.sql
+	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -c "\copy vote FROM Votes.csv CSV HEADER"
+

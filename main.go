@@ -106,6 +106,35 @@ func (b *Badge) ToCSV() []string {
 	}
 }
 
+// Votes.xml
+type Vote struct {
+	ID           int    `xml:"Id,attr"`
+	PostId       int    `xml:"PostId,attr"`
+	VoteTypeId   int    `xml:"VoteTypeId,attr"`
+	UserId       *int   `xml:"UserId,attr"`
+	CreationDate string `xml:"CreationDate,attr"`
+	BountyAmount *int   `xml:"BountyAmount,attr"`
+}
+
+func (v *Vote) ToCSV() []string {
+	user := ""
+	if v.UserId != nil {
+		user = strconv.Itoa(*v.UserId)
+	}
+	bounty := ""
+	if v.BountyAmount != nil {
+		bounty = strconv.Itoa(*v.BountyAmount)
+	}
+	return []string{
+		strconv.Itoa(v.ID),
+		strconv.Itoa(v.PostId),
+		strconv.Itoa(v.VoteTypeId),
+		user,
+		v.CreationDate,
+		bounty,
+	}
+}
+
 // ---- Generic Converter ----
 func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string, newItem func() T) error {
 	// input
@@ -173,11 +202,11 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 
 // ---- Main ----
 func main() {
-	inPath := flag.String("in", "", "Path to XML file (Tags.xml, Users.xml, or Badges.xml)")
+	inPath := flag.String("in", "", "Path to XML file (Tags.xml, Users.xml, Badges.xml, Votes.xml)")
 	flag.Parse()
 
 	if *inPath == "" {
-		fmt.Println("Please provide -in=/path/to/Tags.xml, Users.xml, or Badges.xml")
+		fmt.Println("Please provide -in=/path/to/Tags.xml, Users.xml, Badges.xml, or Votes.xml")
 		return
 	}
 
@@ -212,7 +241,16 @@ func main() {
 		); err != nil {
 			panic(err)
 		}
+	case "votes.xml":
+		if err := convertXMLToCSV(
+			*inPath,
+			outPath,
+			[]string{"id", "post_id", "vote_type_id", "user_id", "creation_date", "bounty_amount"},
+			func() *Vote { return &Vote{} },
+		); err != nil {
+			panic(err)
+		}
 	default:
-		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml supported)\n", base)
+		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml, Votes.xml supported)\n", base)
 	}
 }
