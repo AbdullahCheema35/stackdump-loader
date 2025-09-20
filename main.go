@@ -135,6 +135,39 @@ func (v *Vote) ToCSV() []string {
 	}
 }
 
+// Comments.xml
+type Comment struct {
+	ID              int    `xml:"Id,attr"`
+	PostId          int    `xml:"PostId,attr"`
+	Score           int    `xml:"Score,attr"`
+	Text            string `xml:"Text,attr"`
+	CreationDate    string `xml:"CreationDate,attr"`
+	UserDisplayName string `xml:"UserDisplayName,attr"`
+	UserId          *int   `xml:"UserId,attr"`
+	ContentLicense  string `xml:"ContentLicense,attr"`
+}
+
+func (c *Comment) ToCSV() []string {
+	user := ""
+	if c.UserId != nil {
+		user = strconv.Itoa(*c.UserId)
+	}
+
+	// Escape COPY end marker `\.` so psql won't misinterpret it
+	safeText := strings.ReplaceAll(c.Text, `\.`, `\\.`)
+
+	return []string{
+		strconv.Itoa(c.ID),
+		strconv.Itoa(c.PostId),
+		strconv.Itoa(c.Score),
+		safeText,
+		c.CreationDate,
+		c.UserDisplayName,
+		user,
+		c.ContentLicense,
+	}
+}
+
 // ---- Generic Converter ----
 func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string, newItem func() T) error {
 	// input
@@ -202,11 +235,11 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 
 // ---- Main ----
 func main() {
-	inPath := flag.String("in", "", "Path to XML file (Tags.xml, Users.xml, Badges.xml, Votes.xml)")
+	inPath := flag.String("in", "", "Path to XML file (Tags.xml, Users.xml, Badges.xml, Votes.xml, Comments.xml)")
 	flag.Parse()
 
 	if *inPath == "" {
-		fmt.Println("Please provide -in=/path/to/Tags.xml, Users.xml, Badges.xml, or Votes.xml")
+		fmt.Println("Please provide -in=/path/to/Tags.xml, Users.xml, Badges.xml, Votes.xml, or Comments.xml")
 		return
 	}
 
@@ -250,7 +283,16 @@ func main() {
 		); err != nil {
 			panic(err)
 		}
+	case "comments.xml":
+		if err := convertXMLToCSV(
+			*inPath,
+			outPath,
+			[]string{"id", "post_id", "score", "text", "creation_date", "user_display_name", "user_id", "content_license"},
+			func() *Comment { return &Comment{} },
+		); err != nil {
+			panic(err)
+		}
 	default:
-		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml, Votes.xml supported)\n", base)
+		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml, Votes.xml, Comments.xml supported)\n", base)
 	}
 }
