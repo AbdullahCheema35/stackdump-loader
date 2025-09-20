@@ -85,6 +85,27 @@ func (u *User) ToCSV() []string {
 	}
 }
 
+// Badges.xml
+type Badge struct {
+	ID       int    `xml:"Id,attr"`
+	UserId   int    `xml:"UserId,attr"`
+	Name     string `xml:"Name,attr"`
+	Date     string `xml:"Date,attr"`
+	Class    int    `xml:"Class,attr"`
+	TagBased bool   `xml:"TagBased,attr"`
+}
+
+func (b *Badge) ToCSV() []string {
+	return []string{
+		strconv.Itoa(b.ID),
+		strconv.Itoa(b.UserId),
+		b.Name,
+		b.Date,
+		strconv.Itoa(b.Class),
+		strconv.FormatBool(b.TagBased),
+	}
+}
+
 // ---- Generic Converter ----
 func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string, newItem func() T) error {
 	// input
@@ -152,11 +173,11 @@ func convertXMLToCSV[T CSVConvertible](xmlPath, csvPath string, headers []string
 
 // ---- Main ----
 func main() {
-	inPath := flag.String("in", "", "Path to XML file (Tags.xml or Users.xml)")
+	inPath := flag.String("in", "", "Path to XML file (Tags.xml, Users.xml, or Badges.xml)")
 	flag.Parse()
 
 	if *inPath == "" {
-		fmt.Println("Please provide -in=/path/to/Tags.xml or Users.xml")
+		fmt.Println("Please provide -in=/path/to/Tags.xml, Users.xml, or Badges.xml")
 		return
 	}
 
@@ -182,7 +203,16 @@ func main() {
 		); err != nil {
 			panic(err)
 		}
+	case "badges.xml":
+		if err := convertXMLToCSV(
+			*inPath,
+			outPath,
+			[]string{"id", "user_id", "name", "date", "class", "tag_based"},
+			func() *Badge { return &Badge{} },
+		); err != nil {
+			panic(err)
+		}
 	default:
-		fmt.Printf("Unsupported file: %s (only Tags.xml and Users.xml supported)\n", base)
+		fmt.Printf("Unsupported file: %s (only Tags.xml, Users.xml, Badges.xml supported)\n", base)
 	}
 }

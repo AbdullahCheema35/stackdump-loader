@@ -12,3 +12,8 @@ tags:
 users:
 	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -f users.sql
 	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -c "\copy users FROM Users.csv CSV HEADER"
+
+badges:
+	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -f badge.sql
+	PGPASSWORD=$(PGPASS) psql -h $(HOST_ADDR) -p $(PORT) -U $(USER) -d $(DATABASE) -c "\copy badge FROM Badges.csv CSV HEADER"
+
